@@ -88,7 +88,9 @@ staging/incoming/<jobId>/
 /srv/dsh-cloud/{home, workspaces/<jobId>/, staging/incoming|outgoing/<jobId>/, jobs/<jobId>.json, logs/}
 ```
 
-- 云端 job 状态：`PENDING → RUNNING → DONE | FAILED | CONFLICT`；本地：`LOCAL_ACTIVE → FROZEN → REMOTE_RUNNING → SYNCED | MERGE_NEEDED | FAILED`。
+- 云端 job 状态：`PENDING → RUNNING → DONE | ABORTED | FAILED | CONFLICT`；本地：`LOCAL_ACTIVE → FROZEN → REMOTE_RUNNING → SYNCED | MERGE_NEEDED | ABORTED | FAILED`。
+- **中止（ABORTED）**：云端中止时同样构建真实回传（工作区 diff + 会话尾部帧），状态置 ABORTED；本地中止后保留 active，界面提供「回收进度」手动拉回（ABORTED 不自动回收，避免把用户已否决的半成品静默合并）。
+- **同会话二次迁移（SESSION_LIVE）**：同一会话 id 在云端仍有活体实例时，云端 receive 返回 SESSION_LIVE；本地自动重启云端服务（sudoers 授权 `systemctl restart dsh-cloud`）并重试同 jobId。重启会中断云端其他任务（v1 已知边界）。
 - 全部状态落盘 + receipt 防重复导入；云端 systemd 崩溃重启后按 job 状态与 goal 恢复。
 
 ## 6. RPC 与工具
