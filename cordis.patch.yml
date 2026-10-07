@@ -1,0 +1,4 @@
+# 云接力插件的组合包补丁：把自己作为一行插进 profile 的层栈。
+- insert:
+    - id: cloud-handoff
+      name: dsh-cloud-handoff
