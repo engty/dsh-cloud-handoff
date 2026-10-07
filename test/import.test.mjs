@@ -78,3 +78,46 @@ test("rewriteSessionCwd 只改首事件 cwd，其余事件逐字节保留", asyn
   for (let i = 1; i < 4; i++) assert.equal(lines[i], orig[i], `事件 ${i} 应原样保留`);
   rmSync(tmp, { recursive: true, force: true });
 });
+
+test("scanWorkspace：非 git 目录走遍历模式，排除缓存/凭据/嵌套.git", async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { scanWorkspace } = await import("../lib/handoff.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "dsh-ch-walk-"));
+  writeFileSync(join(dir, "a.txt"), "hello");
+  writeFileSync(join(dir, ".env"), "SECRET=x");                      // 凭据应排除
+  mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });   // 依赖应排除
+  writeFileSync(join(dir, "node_modules", "pkg", "x.js"), "x");
+  mkdirSync(join(dir, "nested", ".git"), { recursive: true });        // 嵌套 .git 应排除
+  writeFileSync(join(dir, "nested", ".git", "HEAD"), "ref");
+  writeFileSync(join(dir, "nested", "keep.md"), "keep");
+  const scan = scanWorkspace(dir);
+  assert.equal(scan.mode, "walk");
+  assert.ok(scan.files.includes("a.txt"));
+  assert.ok(scan.files.includes("nested/keep.md"));
+  assert.ok(!scan.files.includes(".env"));
+  assert.ok(!scan.files.some((f) => f.startsWith("node_modules/")));
+  assert.ok(!scan.files.some((f) => f.includes("/.git/")));
+  assert.ok(scan.skipped >= 2);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("scanWorkspace：git 仓库根目录走 git 模式", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { spawnSync } = await import("node:child_process");
+  const { scanWorkspace } = await import("../lib/handoff.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "dsh-ch-git-"));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  writeFileSync(join(dir, "tracked.txt"), "t");
+  spawnSync("git", ["-C", dir, "add", "-A"]);
+  spawnSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]);
+  writeFileSync(join(dir, "untracked.txt"), "u");
+  const scan = scanWorkspace(dir);
+  assert.equal(scan.mode, "git");
+  assert.ok(scan.files.includes("tracked.txt"));
+  assert.ok(scan.files.includes("untracked.txt"));
+  rmSync(dir, { recursive: true, force: true });
+});
