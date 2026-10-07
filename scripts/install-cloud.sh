@@ -11,8 +11,7 @@
 #   --key-file <f>        DeepSeek API Key 文件（一次性读取后删除；缺省稍后自行配置）
 #   --ssh-pubkey <f>      本机 SSH 公钥文件（写入 dshcloud authorized_keys，用于插件免密通道）
 #   --ssh-pubkey-url <u>  从 URL 取公钥（如 https://github.com/<user>.keys）
-#   --proxy-config <f>    mihomo 配置文件（可选；提供后自动下载兼容构建并部署出站代理）
-#   --registry cn         国内网络：npm 改用 npmmirror 镜像
+#   --mirror cn           国内网络：apt 换国内源（清华 TUNA）+ npm 换 npmmirror（国内服务器推荐）
 #
 # 脚本结束会打印「对接码」（DSHCP1:…），粘贴到插件的「设置 → 云接力 → 云端接入」即完成对接。
 set -euo pipefail
@@ -25,9 +24,7 @@ DSH_HOME_DIR="${BASE}/home"
 KEY_FILE=""
 SSH_PUBKEY=""
 SSH_PUBKEY_URL=""
-PROXY_CONFIG=""
-REGISTRY_CN=""
-MIHOMO_BINARY=""
+MIRROR_CN=""
 REPO_URL=""
 PLUGIN_DIR=""
 
@@ -38,9 +35,8 @@ while [ $# -gt 0 ]; do
     --key-file) KEY_FILE="$2"; shift 2 ;;
     --ssh-pubkey) SSH_PUBKEY="$2"; shift 2 ;;
     --ssh-pubkey-url) SSH_PUBKEY_URL="$2"; shift 2 ;;
-    --proxy-config) PROXY_CONFIG="$2"; shift 2 ;;
-    --mihomo-binary) MIHOMO_BINARY="$2"; shift 2 ;;
-    --registry) REGISTRY_CN="$2"; shift 2 ;;
+    --mirror) MIRROR_CN="$2"; shift 2 ;;
+    --registry) MIRROR_CN="$2"; shift 2 ;;   # 兼容旧参数名
     --repo) REPO_URL="$2"; shift 2 ;;
     --plugin-dir) PLUGIN_DIR="$2"; shift 2 ;;
     *) echo "未知参数: $1" >&2; exit 1 ;;
@@ -50,34 +46,90 @@ done
 if [ "$(id -u)" -ne 0 ]; then echo "请以 root 运行（sudo）" >&2; exit 1; fi
 
 NPM_REG="https://registry.npmjs.org"
-[ "$REGISTRY_CN" = "cn" ] && NPM_REG="https://registry.npmmirror.com"
+[ "$MIRROR_CN" = "cn" ] && NPM_REG="https://registry.npmmirror.com"
 
-# 发行版探测
+# 发行版探测（只支持 Debian 12/13 与 Ubuntu 22.04/24.04）
+DISTRO_ID=""; DISTRO_VER=""
 if [ -f /etc/os-release ]; then
   # shellcheck disable=SC1091
   . /etc/os-release
-  echo "检测到发行版: $PRETTY_NAME"
+  DISTRO_ID="${ID:-}"; DISTRO_VER="${VERSION_ID:-}"
+  echo "检测到发行版: ${PRETTY_NAME:-$DISTRO_ID $DISTRO_VER}"
 fi
+case "$DISTRO_ID:$DISTRO_VER" in
+  debian:12|debian:13|ubuntu:22.04|ubuntu:24.04) : ;;
+  *)
+    echo "✗ 仅支持 Debian 12/13 与 Ubuntu 22.04/24.04（当前: ${DISTRO_ID:-未知} ${DISTRO_VER:-}）。" >&2
+    echo "  其它发行版未适配；如确需使用请提 issue（附 /etc/os-release）。" >&2
+    exit 1
+    ;;
+esac
 
-echo "== 1/9 系统包 =="
+# Ubuntu 加固：apt 期间不弹 needrestart 交互、配置文件冲突取默认值
+export NEEDRESTART_MODE=a
+# DPkg::Lock::Timeout：apt 自己在锁上排队（全新云镜像首次开机的 unattended-upgrades 可能占用数分钟），
+# 比轮询进程更可靠，Debian 12+ / Ubuntu 22.04+ 均支持。
+APT_OPTS="-o DPkg::Lock::Timeout=900 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+
+echo "== 0/8 等待系统初始化 =="
+# 全新服务器首次开机时 cloud-init / unattended-upgrades 可能在跑 apt，
+# 直接装包会撞 /var/lib/apt/lists/lock 失败——先等它们结束。
+if command -v cloud-init >/dev/null 2>&1; then
+  cloud-init status --wait >/dev/null 2>&1 || true
+fi
+for i in $(seq 1 60); do
+  if ! pgrep -x apt-get >/dev/null 2>&1 && ! pgrep -x apt >/dev/null 2>&1 \
+     && ! pgrep -x dpkg >/dev/null 2>&1 && ! pgrep -x unattended-upgr >/dev/null 2>&1; then
+    break
+  fi
+  [ "$i" = "1" ] && echo "系统正在初始化（cloud-init/unattended-upgrades 占用 apt），等待其完成…"
+  sleep 5
+done
+# 即使仍在占用，下面 apt 也会用 DPkg::Lock::Timeout 继续排队等待
+echo "== 1/8 软件源与系统包 =="
+if [ "$MIRROR_CN" = "cn" ]; then
+  DEB_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/debian"
+  DEB_SEC="https://mirrors.tuna.tsinghua.edu.cn/debian-security"
+  if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+    sed -i -E "s#^URIs: https?://deb\.debian\.org/debian#URIs: ${DEB_MIRROR}#" /etc/apt/sources.list.d/debian.sources
+    sed -i -E "s#^URIs: https?://security\.debian\.org/debian-security#URIs: ${DEB_SEC}#" /etc/apt/sources.list.d/debian.sources
+  fi
+  if [ -f /etc/apt/sources.list ]; then
+    [ -f /etc/apt/sources.list.dsh-bak ] || cp /etc/apt/sources.list /etc/apt/sources.list.dsh-bak
+    sed -i -E "s#https?://deb\.debian\.org/debian#${DEB_MIRROR}#g; s#https?://security\.debian\.org/debian-security#${DEB_SEC}#g; s#https?://deb\.debian\.org/debian-security#${DEB_SEC}#g" /etc/apt/sources.list
+  fi
+  if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+    sed -i -E "s#^URIs: https?://(archive|security)\.ubuntu\.com/ubuntu#URIs: https://mirrors.tuna.tsinghua.edu.cn/ubuntu#" /etc/apt/sources.list.d/ubuntu.sources
+  fi
+  if [ -f /etc/apt/sources.list ] && grep -qi ubuntu /etc/apt/sources.list 2>/dev/null; then
+    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu#https://mirrors.tuna.tsinghua.edu.cn/ubuntu#g" /etc/apt/sources.list
+  fi
+  echo "apt 源已切换为清华 TUNA 镜像（原文件备份为 *.dsh-bak）"
+fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg git python3 openssl
+apt-get install -y -qq $APT_OPTS ca-certificates curl gnupg git python3 openssl
 
-echo "== 2/9 Node.js 22 =="
+echo "== 2/8 Node.js 22 =="
 if ! command -v node >/dev/null 2>&1 || ! node -v 2>/dev/null | grep -q '^v22'; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  apt-get install -y -qq nodejs
+  if ! (curl -fsSL https://deb.nodesource.com/setup_22.x | bash -) || ! apt-get install -y -qq $APT_OPTS nodejs; then
+    echo "nodesource 不可用，改用 Node 官方二进制镜像…"
+    NARCH="x64"; case "$(uname -m)" in aarch64|arm64) NARCH="arm64" ;; esac
+    NODE_VER="${NODE_VER:-v22.19.0}"
+    curl -fsSL -o /tmp/node.tar.xz "https://npmmirror.com/mirrors/node/${NODE_VER}/node-${NODE_VER}-linux-${NARCH}.tar.xz"
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --exclude=CHANGELOG.md --exclude=LICENSE --exclude=README.md
+    rm -f /tmp/node.tar.xz
+  fi
 fi
 node -v
 npm config set registry "$NPM_REG" || true
 
-echo "== 3/9 pnpm + DSH CLI ($DSH_VERSION) =="
+echo "== 3/8 pnpm + DSH CLI ($DSH_VERSION) =="
 npm install -g pnpm >/dev/null 2>&1 || true
 npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" >/dev/null 2>&1 || true
 command -v dsh && dsh --version || true
 
-echo "== 4/9 目录、用户与凭据 =="
+echo "== 4/8 目录、用户与凭据 =="
 id -u "$DSH_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$DSH_USER"
 install -d -o "$DSH_USER" -g "$DSH_USER" \
   "$DSH_HOME_DIR" \
@@ -123,7 +175,7 @@ chmod 440 /etc/sudoers.d/dshcloud-restart
 # 给 dshcloud 用户也配镜像源
 sudo -u "$DSH_USER" npm config set registry "$NPM_REG" || true
 
-echo "== 5/9 cloud profile 初始化 =="
+echo "== 5/8 cloud profile 初始化 =="
 PROFILE_JSON="$DSH_HOME_DIR/profiles/cloud/package.json"
 if [ ! -f "$PROFILE_JSON" ]; then
   sudo -u "$DSH_USER" env DSH_HOME="$DSH_HOME_DIR" \
@@ -144,9 +196,7 @@ EOF
 fi
 (cd "$DSH_HOME_DIR/profiles/cloud" && pnpm install >/dev/null 2>&1 || true)
 
-echo "== 6/9 systemd 服务（dsh-cloud）=="
-PROXY_ENV=""
-if [ -n "$PROXY_CONFIG" ]; then PROXY_ENV=$'Environment=http_proxy=http://127.0.0.1:7890\nEnvironment=https_proxy=http://127.0.0.1:7890\nEnvironment=no_proxy=localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8'; fi
+echo "== 6/8 systemd 服务（dsh-cloud）=="
 cat > /etc/systemd/system/dsh-cloud.service <<EOF
 [Unit]
 Description=DSH Cloud Handoff — 云端常驻执行端
@@ -154,7 +204,6 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-${PROXY_ENV}
 Type=simple
 User=${DSH_USER}
 Environment=HOME=/home/${DSH_USER}
@@ -171,47 +220,7 @@ EOF
 systemctl daemon-reload
 systemctl enable --now dsh-cloud
 
-echo "== 7/9 mihomo 出站代理（可选）=="
-if [ -n "$PROXY_CONFIG" ] && [ -f "$PROXY_CONFIG" ]; then
-  install -d /etc/mihomo
-  install -m 0644 "$PROXY_CONFIG" /etc/mihomo/config.yaml
-  if [ -z "$MIHOMO_BINARY" ] || [ ! -f "$MIHOMO_BINARY" ]; then
-    ARCH="amd64"
-    case "$(uname -m)" in
-      aarch64|arm64) ARCH="arm64" ;;
-    esac
-    MIHOMO_VER="v1.19.32"
-    MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${ARCH}-compatible-${MIHOMO_VER}.gz"
-    echo "下载 mihomo（compatible 构建，$ARCH）…"
-    curl -fsSL -o /tmp/mihomo.gz "$MIHOMO_URL"
-    MIHOMO_BINARY="/tmp/mihomo.gz"
-  fi
-  gunzip -c "$MIHOMO_BINARY" > /tmp/mihomo 2>/dev/null || cp "$MIHOMO_BINARY" /tmp/mihomo
-  install -m 0755 /tmp/mihomo /usr/local/bin/mihomo
-  cat > /etc/systemd/system/mihomo.service <<'EOF'
-[Unit]
-Description=mihomo (Clash Meta core) — 云端出站代理
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/mihomo -d /etc/mihomo -f /etc/mihomo/config.yaml
-Restart=always
-RestartSec=3
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  systemctl enable --now mihomo
-  echo "mihomo 已部署；dsh-cloud 服务走 127.0.0.1:7890"
-else
-  echo "未提供 --proxy-config，跳过代理部署（云端直连）"
-fi
-
-echo "== 8/9 DeepSeek API Key =="
+echo "== 7/8 DeepSeek API Key =="
 if [ -n "$KEY_FILE" ] && [ -f "$KEY_FILE" ]; then
   KEY="$(cat "$KEY_FILE")"
   CRED="$DSH_HOME_DIR/.credentials.yaml"
@@ -243,7 +252,7 @@ else
   echo "未提供 --key-file，稍后自行配置 API Key（可参考文档用 SSH 隧道打开云端设置页）"
 fi
 
-echo "== 9/9 云端插件与完成 =="
+echo "== 8/8 云端插件与完成 =="
 # 插件 bundle：若服务器已放置本仓库则 link，否则提示安装方式
 PLUGIN_DIR="${PLUGIN_DIR:-/srv/dsh-cloud-handoff}"
 if [ -n "$REPO_URL" ]; then

@@ -12,8 +12,11 @@
   },
   "files": [
     "lib",
+    "scripts",
+    "docs",
     "cordis.patch.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "keywords": [
@@ -44,5 +47,14 @@
   },
   "scripts": {
     "test": "node --test test/"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/engty/dsh-cloud-handoff.git"
+  },
+  "homepage": "https://github.com/engty/dsh-cloud-handoff#readme",
+  "bugs": {
+    "url": "https://github.com/engty/dsh-cloud-handoff/issues"
+  },
+  "author": "engty"
 }
