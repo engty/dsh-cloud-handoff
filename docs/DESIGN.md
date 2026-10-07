@@ -91,6 +91,9 @@ staging/incoming/<jobId>/
 - 云端 job 状态：`PENDING → RUNNING → DONE | ABORTED | FAILED | CONFLICT`；本地：`LOCAL_ACTIVE → FROZEN → REMOTE_RUNNING → SYNCED | MERGE_NEEDED | ABORTED | FAILED`。
 - **中止（ABORTED）**：云端中止时同样构建真实回传（工作区 diff + 会话尾部帧），状态置 ABORTED；本地中止后保留 active，界面提供「回收进度」手动拉回（ABORTED 不自动回收，避免把用户已否决的半成品静默合并）。
 - **同会话二次迁移（SESSION_LIVE）**：同一会话 id 在云端仍有活体实例时，云端 receive 返回 SESSION_LIVE；本地自动重启云端服务（sudoers 授权 `systemctl restart dsh-cloud`）并重试同 jobId。重启会中断云端其他任务（v1 已知边界）。
+- **取回三段式（v0.2）**：① `downloadResult` 只下载回传包（不落盘）→ 本地状态 RETURNED（待取回）；② 落盘二选一：**子智能体取回**（默认，向原会话注入取回指令，父 agent 派子智能体用 `dsh_cloud_apply_result` 消费回传包并合并落盘，先报清单再动手）或**机械应用**（逐文件三路判断兜底）；③ 落盘确认或丢弃后本地调云端 `/ack` 清全部云端副本。会话尾部**永不拼回当前会话**（seq 撞号风险），只供子智能体经 transcript 模式读取。
+- **回传包 v2**：workspace-diff.tar.zst（云端最终内容）+ base.tar.zst（被改文件的迁移前基线，三路合并用）+ deleted.json + session-tail.v4.jsonl.zstd + receipt（含 summary/startedAt/finishedAt/finalState/tailEvents/listing）。
+- **清理策略（用户明确要求）**：云端副本在本地 ack（确认完成/丢弃）后立即清除；未确认的终态任务按 `retentionDays`（默认 7 天）由云端定时清扫（启动 30s + 每 12h）。本地下载缓存与回传包在确认/丢弃后删除；本地 jobs.json 保留最近 20 条记录。云端产生的对话永不进入本地会话历史 → 上下文零污染。
 - 全部状态落盘 + receipt 防重复导入；云端 systemd 崩溃重启后按 job 状态与 goal 恢复。
 
 ## 6. RPC 与工具

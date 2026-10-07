@@ -24,6 +24,13 @@ ssh dsh-cloud 'cat /srv/dsh-cloud/jobs/<jobId>.json'
 cat ~/.dsh/dsh-cloud-handoff/jobs.json
 ```
 
+## 清理
+
+- **确认/丢弃即清**：本地点「确认完成」或「丢弃」→ 云端工作区、进出 bundle、会话副本、job 记录立即删除。
+- **保留期兜底**：终态任务（DONE/ABORTED/FAILED）超 `retentionDays`（默认 7 天）由云端自动清扫（启动 30s 一次 + 每 12h 一次）；改 `/home/dshcloud/.dsh/dsh-cloud-handoff/config.json` 的 `retentionDays` 后重启云端服务生效。
+- **本地缓存**：`~/.dsh/dsh-cloud-handoff/work/pulled/<jobId>`（下载的回传包）在确认/丢弃后删除；`jobs.json` 保留最近 20 条。
+- **手动应急清理**（云端）：`ssh dsh-cloud 'rm -rf /srv/dsh-cloud/{jobs,staging/incoming,staging/outgoing,workspaces,home/sessions}/*'`。
+
 ## 故障处理
 
 - **本机显示「云端执行中」但迟迟不完成**：查云端任务状态；若 agent 卡死 → 设置页「中止云端任务」（云端会话 cancel + 状态 FAILED，本机仍可拉取已产出部分）。
