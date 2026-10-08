@@ -178,7 +178,7 @@ sudo -u "$DSH_USER" npm config set registry "$NPM_REG" || true
 echo "== 5/8 cloud profile 初始化 =="
 PROFILE_JSON="$DSH_HOME_DIR/profiles/cloud/package.json"
 if [ ! -f "$PROFILE_JSON" ]; then
-  sudo -u "$DSH_USER" env DSH_HOME="$DSH_HOME_DIR" \
+  sudo -u "$DSH_USER" env HOME="/home/$DSH_USER" DSH_HOME="$DSH_HOME_DIR" \
     dsh --from-default-profile web --profile cloud --help >/dev/null 2>&1 || true
 fi
 if [ -f "$DSH_HOME_DIR/profiles/cloud/pnpm-workspace.yaml" ]; then
@@ -194,7 +194,11 @@ except FileNotFoundError:
     print("pnpm-workspace.yaml 不存在，跳过")
 EOF
 fi
-(cd "$DSH_HOME_DIR/profiles/cloud" && pnpm install >/dev/null 2>&1 || true)
+# 统一属主：profile 目录可能被 root 操作过，pnpm 以 dshcloud 身份运行才不会再撞权限
+chown -R "$DSH_USER:$DSH_USER" "$DSH_HOME_DIR"
+sudo -u "$DSH_USER" env HOME="/home/$DSH_USER" DSH_HOME="$DSH_HOME_DIR" \
+  bash -c "cd '$DSH_HOME_DIR/profiles/cloud' && pnpm install" >/dev/null 2>&1 || true
+chown -R "$DSH_USER:$DSH_USER" "$DSH_HOME_DIR"
 
 echo "== 6/8 systemd 服务（dsh-cloud）=="
 cat > /etc/systemd/system/dsh-cloud.service <<EOF
@@ -255,18 +259,45 @@ fi
 echo "== 8/8 云端插件与完成 =="
 # 插件 bundle：若服务器已放置本仓库则 link，否则提示安装方式
 PLUGIN_DIR="${PLUGIN_DIR:-/srv/dsh-cloud-handoff}"
+LINK_LOG="/tmp/dsh-cloud-link.log"
 if [ -n "$REPO_URL" ]; then
   rm -rf "$PLUGIN_DIR"
   git clone --depth 1 "$REPO_URL" "$PLUGIN_DIR"
 fi
-if [ -d "$PLUGIN_DIR" ]; then
-  chown -R "$DSH_USER:$DSH_USER" "$PLUGIN_DIR"
-  sudo -u "$DSH_USER" env DSH_HOME="$DSH_HOME_DIR" dsh plugin --profile cloud link "$PLUGIN_DIR" >/dev/null 2>&1 || true
-else
-  echo "提示：请把插件 bundle 放到 $PLUGIN_DIR，或重跑脚本加 --repo <git地址> 自动克隆，然后执行："
-  echo "  sudo -u $DSH_USER env DSH_HOME=$DSH_HOME_DIR dsh plugin --profile cloud link $PLUGIN_DIR"
+if [ ! -d "$PLUGIN_DIR" ]; then
+  echo "✗ 未找到插件 bundle：$PLUGIN_DIR" >&2
+  echo "  请 git clone 本仓库到该路径，或重跑脚本加 --repo <git地址> / --plugin-dir <路径>。" >&2
+  exit 1
 fi
+chown -R "$DSH_USER:$DSH_USER" "$PLUGIN_DIR"
+chown -R "$DSH_USER:$DSH_USER" "$DSH_HOME_DIR"
+if ! sudo -u "$DSH_USER" env HOME="/home/$DSH_USER" DSH_HOME="$DSH_HOME_DIR" \
+     dsh plugin --profile cloud link "$PLUGIN_DIR" >"$LINK_LOG" 2>&1; then
+  echo "✗ 插件链接失败（云端将无法工作）。日志尾部：" >&2
+  tail -15 "$LINK_LOG" >&2
+  exit 1
+fi
+if ! grep -q '"dsh-cloud-handoff"' "$PROFILE_JSON" 2>/dev/null; then
+  echo "✗ 插件未出现在 cloud profile 的 bundles 列表（详见 $LINK_LOG）" >&2
+  exit 1
+fi
+echo "插件已链接并写入 cloud profile ✓"
 systemctl restart dsh-cloud || true
+
+# 启动后自检：云端插件 RPC 是否真的在线（DSH 冷启动约 20~30 秒，这里轮询最多 90 秒）
+echo "等待云端 DSH 启动并自检…"
+SELFCHECK_FAILED=1
+for i in $(seq 1 18); do
+  if curl -s --max-time 6 -X POST "http://127.0.0.1:${WEB_PORT}/_dsh/dsh-cloud-handoff/ping" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
+    SELFCHECK_FAILED=0
+    echo "云端插件自检通过 ✓（第 $((i * 5)) 秒）"
+    break
+  fi
+  sleep 5
+done
+if [ "$SELFCHECK_FAILED" = "1" ]; then
+  echo "⚠ 云端插件自检失败（90 秒内无响应）：journalctl -u dsh-cloud -n 50 查看原因" >&2
+fi
 
 # ---- 对接信息 ----
 HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -293,6 +324,10 @@ cat <<EOF
  Token:  ${TOKEN}
 ============================================================
 EOF
+
+if [ "${SELFCHECK_FAILED:-0}" = "1" ]; then
+  echo "⚠ 注意：云端插件自检未通过，请先排查再使用插件对接。" >&2
+fi
 
 if [ -z "$PUBKEY_ADDED" ]; then
   cat <<EOF
