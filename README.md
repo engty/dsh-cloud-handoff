@@ -56,7 +56,8 @@ DSHCP1:eyJob3N0IjoiMTkyLjE2OC4xLjQxIiwic3NoVXNlciI6...
 ### 3. 在本机 DSH 安装插件并粘贴对接码
 
 ```bash
-dsh plugin --profile desktop install dsh-cloud-handoff
+# 二选一：命令行，或在 DSH 的插件管理界面安装/启用 dsh-cloud-handoff
+dsh plugin --profile desktop add dsh-cloud-handoff
 ```
 
 打开 **设置 → 云接力 → 云端接入** → 粘贴对接码 → 「解析并接入」→「测试连通」。看到绿色「已接入」即可。

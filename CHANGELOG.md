@@ -1,6 +1,8 @@
 # 更新记录
 
-## [未发布] — R3 真机验证修复（Debian 12 / Ubuntu 24.04 全新机器实测）
+## [0.2.4] — 2026-10-08
+
+R3 真机验证修复（Debian 12 / Ubuntu 24.04 全新机器实测）+ 仓库开源化（README/LICENSE/CHANGELOG/CI）。
 
 一键脚本在**全新云镜像**上跑出来的真实问题，全部已修：
 - **插件未被云端加载**：`dsh plugin link/add` 只写 `dependencies`，不写 `dsh.profile.bundles`，插件装上却不会加载；脚本现在显式注册 bundle，并校验「依赖 + bundle」两项

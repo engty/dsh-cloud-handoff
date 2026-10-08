@@ -9,23 +9,23 @@ import { readFile } from "node:fs/promises";
 
 // 本机真实目录名 → 路径 的 6 组对照（2026-10-07 实测）
 const REAL_PAIRS = [
-  ["/Users/engtyleong/.dsh/dsh_orb", "--Users-engtyleong-.dsh-dsh_orb--"],
-  ["/Users/engtyleong/Documents/deepseek-harness/default-workspace", "--Users-engtyleong-Documents-deepseek-harness-default-workspace--"],
-  ["/Users/engtyleong/Projects/OKX_DBEMA", "--Users-engtyleong-Projects-OKX_DBEMA--"],
-  ["/Users/engtyleong/Projects/MacOS", "--Users-engtyleong-Projects-MacOS--"],
-  ["/Users/engtyleong/Projects/PVE", "--Users-engtyleong-Projects-PVE--"],
-  ["/Users/engtyleong/Projects/20717222142", "--Users-engtyleong-Projects-20717222142--"],
+  ["/Users/alice/.dsh/dsh_orb", "--Users-alice-.dsh-dsh_orb--"],
+  ["/Users/alice/Documents/deepseek-harness/default-workspace", "--Users-alice-Documents-deepseek-harness-default-workspace--"],
+  ["/Users/alice/Projects/my-strategy", "--Users-alice-Projects-my-strategy--"],
+  ["/Users/alice/Projects/notes", "--Users-alice-Projects-notes--"],
+  ["/Users/alice/Projects/homelab", "--Users-alice-Projects-homelab--"],
+  ["/Users/alice/Projects/demo-app", "--Users-alice-Projects-demo-app--"],
 ];
 
 test("encodeWorkspacePath 与真实目录名一致（含中文）", () => {
   for (const [path, name] of REAL_PAIRS) {
     assert.equal(encodeWorkspacePath(path), name, `路径 ${path}`);
   }
-  // 中文（任=4EFB 务=52A1；相邻转义共享波浪号边界）
-  const zh = "/Users/engtyleong/.dsh/dsh_orb/任务-把一台新的-3x-ui-自建节点加进用户-flclash-的-clash";
+  // 中文（任=4EFB 务=52A1 示=793A 例=4F8B 目=76EE 录=5F55；相邻转义共享波浪号边界）
+  const zh = "/Users/alice/.dsh/dsh_orb/任务-示例目录";
   assert.equal(
     encodeWorkspacePath(zh),
-    "--Users-engtyleong-.dsh-dsh_orb-~4EFB~52A1-~628A~4E00~53F0~65B0~7684-3x-ui-~81EA~5EFA~8282~70B9~52A0~8FDB~7528~6237-flclash-~7684-clash--"
+    "--Users-alice-.dsh-dsh_orb-~4EFB~52A1-~793A~4F8B~76EE~5F55--"
   );
   // 空格与波浪号等不安全 ASCII 也要转义
   assert.equal(encodeWorkspacePath("/tmp/a b~/c"), "--tmp-a~0020b~007E-c--");
