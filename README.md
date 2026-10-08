@@ -131,6 +131,10 @@ node --test test/                         # 单测：会话帧迁移、状态机
 dsh plugin --profile desktop install .    # 本地联调
 ```
 
+## 发布说明
+
+版本由 GitHub Actions 通过 npm [Trusted Publishing](https://docs.npmjs.com/trusted-publishers)（OIDC）发布，附 **provenance 签名**——可用 `npm audit signatures` 验证包确实由本仓库构建；维护者流程见 [docs/PUBLISHING.md](docs/PUBLISHING.md)。
+
 ## License
 
 [MIT](LICENSE) © 2026 engty

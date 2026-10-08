@@ -1,5 +1,12 @@
 # 更新记录
 
+## [0.2.5] — 2026-10-08
+
+发布流程升级为 **npm Trusted Publishing（OIDC 受信发布）**：
+- 打 tag 即由 GitHub Actions 自动发布到 npm，**无需 token、无需 2FA 交互**
+- 自动附带 **provenance 签名**（用户可验证包确实由本仓库构建）
+- 发布前强制校验 `tag` 与 `package.json` 版本一致
+
 ## [0.2.4] — 2026-10-08
 
 R3 真机验证修复（Debian 12 / Ubuntu 24.04 全新机器实测）+ 仓库开源化（README/LICENSE/CHANGELOG/CI）。
