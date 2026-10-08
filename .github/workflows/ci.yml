@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 单测（Node ${{ matrix.node }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: 单元测试（会话帧迁移 / 状态机 / 工作区扫描）
+        run: node --test test/
+
+  modules:
+    name: 模块可加载性（宿主 + 客户端）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 宿主模块 import（无 window 环境）
+        run: node -e "import('./lib/index.js').then(() => console.log('host ok'))"
+      - name: 客户端模块 import（typeof window 守卫）
+        run: node -e "import('./lib/client.js').then(() => console.log('client ok'))"
+      - name: bundle 配置完整性（cordis.patch.yml / package.json 字段）
+        run: |
+          node -e "
+          const p = require('./package.json');
+          const fs = require('node:fs');
+          const must = ['name','version','dsh','cordis','engines'];
+          for (const k of must) if (!(k in p)) { console.error('缺少字段: ' + k); process.exit(1); }
+          if (!fs.existsSync(p.dsh.bundle.patch)) { console.error('缺少 patch 文件'); process.exit(1); }
+          if (!fs.existsSync('scripts/install-cloud.sh')) { console.error('缺少一键脚本'); process.exit(1); }
+          console.log('bundle 配置完整 ✓');
+          "
+      - name: 一键脚本语法检查
+        run: bash -n scripts/install-cloud.sh
+      - name: npm 打包清单检查
+        run: |
+          npm pack --dry-run 2>&1 | tail -20
