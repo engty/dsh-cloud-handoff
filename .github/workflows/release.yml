@@ -1,0 +1,38 @@
+name: Release
+
+# 由 Git tag 触发：v0.2.5 之类
+# 使用 npm Trusted Publishing（OIDC）：无需 NPM_TOKEN、无需 2FA 交互，并自动附带 provenance 签名
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write          # OIDC 受信发布必需
+
+jobs:
+  publish:
+    name: 发布到 npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      # 受信发布需要 npm >= 11.5.1
+      - name: 升级 npm
+        run: npm install -g npm@latest
+      - name: 单测
+        run: node --test test/*.test.mjs
+      - name: 校验 tag 与 package.json 版本一致
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG=${GITHUB_REF_NAME#v}
+          if [ "$PKG" != "$TAG" ]; then
+            echo "✗ tag($TAG) 与 package.json($PKG) 版本不一致"; exit 1
+          fi
+          echo "版本一致：$PKG"
+      - name: 发布（OIDC 受信发布 + provenance）
+        run: npm publish --access public --provenance
