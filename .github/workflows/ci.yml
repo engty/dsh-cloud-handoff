@@ -20,20 +20,22 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: 单元测试（会话帧迁移 / 状态机 / 工作区扫描）
-        run: node --test test/
+        run: node --test test/*.test.mjs
 
   modules:
-    name: 模块可加载性（宿主 + 客户端）
+    name: 语法与 bundle 配置检查
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: 宿主模块 import（无 window 环境）
-        run: node -e "import('./lib/index.js').then(() => console.log('host ok'))"
-      - name: 客户端模块 import（typeof window 守卫）
-        run: node -e "import('./lib/client.js').then(() => console.log('client ok'))"
+      # 只做语法解析：宿主/客户端模块在运行时会从 DSH profile 解析 peer 依赖，
+      # 干净检出里没有 node_modules，因此不做真实 import（那部分在发布清单的手工兼容性验证里做）。
+      - name: 宿主与客户端模块语法检查
+        run: |
+          for f in lib/*.js lib/*.mjs; do node --check "$f" || exit 1; done
+          echo "语法检查通过 ✓"
       - name: bundle 配置完整性（cordis.patch.yml / package.json 字段）
         run: |
           node -e "

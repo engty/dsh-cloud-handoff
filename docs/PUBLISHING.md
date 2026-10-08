@@ -5,10 +5,9 @@
 ## 0. 发布前检查
 
 ```bash
-node --test test/                      # 单测（会话帧迁移 / 状态机 / 工作区扫描）
+node --test test/*.test.mjs            # 单测（会话帧迁移 / 状态机 / 工作区扫描）
 bash -n scripts/install-cloud.sh       # 一键脚本语法
-node -e "import('./lib/index.js').then(()=>console.log('host ok'))"
-node -e "import('./lib/client.js').then(()=>console.log('client ok'))"
+for f in lib/*.js lib/*.mjs; do node --check "$f"; done   # 语法检查（真实 import 需在 DSH profile 内验证）
 npm pack --dry-run                     # 确认发布内容（lib/ scripts/ docs/ cordis.patch.yml README LICENSE CHANGELOG）
 ```
 
