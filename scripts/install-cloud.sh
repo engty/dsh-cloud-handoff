@@ -25,12 +25,13 @@ KEY_FILE=""
 SSH_PUBKEY=""
 SSH_PUBKEY_URL=""
 MIRROR_CN=""
+PORT_FORCED=0
 REPO_URL=""
 PLUGIN_DIR=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --port) WEB_PORT="$2"; shift 2 ;;
+    --port) WEB_PORT="$2"; PORT_FORCED=1; shift 2 ;;
     --dsh-version) DSH_VERSION="$2"; shift 2 ;;
     --key-file) KEY_FILE="$2"; shift 2 ;;
     --ssh-pubkey) SSH_PUBKEY="$2"; shift 2 ;;
@@ -145,12 +146,30 @@ install -d -o "$DSH_USER" -g "$DSH_USER" "$PLUGIN_CFG_DIR"
 if [ -f "$PLUGIN_CFG_DIR/config.json" ]; then
   TOKEN="$(python3 -c "import json,sys; print(json.load(open('$PLUGIN_CFG_DIR/config.json')).get('token',''))" 2>/dev/null || true)"
 fi
+# 端口持久化：重跑脚本时沿用首次生成的端口，避免破坏已配对客户端的配置（除非显式 --port）
+if [ "$PORT_FORCED" = "0" ] && [ -f "$PLUGIN_CFG_DIR/config.json" ]; then
+  SAVED_PORT="$(python3 -c "import json;print(json.load(open('$PLUGIN_CFG_DIR/config.json')).get('webPort',''))" 2>/dev/null || true)"
+  case "$SAVED_PORT" in
+    ''|*[!0-9]*) : ;;
+    *) [ "$SAVED_PORT" != "$WEB_PORT" ] && echo "沿用已保存的云端端口：$SAVED_PORT（--port 可覆盖）"; WEB_PORT="$SAVED_PORT" ;;
+  esac
+fi
 if [ -z "${TOKEN:-}" ]; then
   TOKEN="$(openssl rand -hex 24)"
-  printf '{"role": "cloud", "token": "%s", "retentionDays": 7}\n' "$TOKEN" > "$PLUGIN_CFG_DIR/config.json"
-  chown "$DSH_USER:$DSH_USER" "$PLUGIN_CFG_DIR/config.json"
-  chmod 600 "$PLUGIN_CFG_DIR/config.json"
 fi
+python3 - "$PLUGIN_CFG_DIR/config.json" "$TOKEN" "$WEB_PORT" <<'PYCFG'
+import json, os, sys
+path, token, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+cfg = {}
+if os.path.exists(path):
+    try: cfg = json.load(open(path))
+    except Exception: cfg = {}
+cfg.update({"role": "cloud", "token": token, "webPort": port})
+cfg.setdefault("retentionDays", 7)
+json.dump(cfg, open(path, "w"), indent=2, ensure_ascii=False)
+PYCFG
+chown "$DSH_USER:$DSH_USER" "$PLUGIN_CFG_DIR/config.json"
+chmod 600 "$PLUGIN_CFG_DIR/config.json"
 
 # SSH 免密（插件通道）：写入 dshcloud authorized_keys
 install -d -o "$DSH_USER" -g "$DSH_USER" -m 700 /home/$DSH_USER/.ssh
@@ -277,11 +296,32 @@ if ! sudo -u "$DSH_USER" env HOME="/home/$DSH_USER" DSH_HOME="$DSH_HOME_DIR" \
   tail -15 "$LINK_LOG" >&2
   exit 1
 fi
-if ! grep -q '"dsh-cloud-handoff"' "$PROFILE_JSON" 2>/dev/null; then
-  echo "✗ 插件未出现在 cloud profile 的 bundles 列表（详见 $LINK_LOG）" >&2
+# dsh plugin link/add 只写 dependencies，不会写 dsh.profile.bundles —— 必须显式注册，否则云端不会加载插件
+python3 - "$PROFILE_JSON" <<'PYJSON'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+b = d.setdefault("dsh", {}).setdefault("profile", {}).setdefault("bundles", [])
+if "dsh-cloud-handoff" not in b:
+    b.append("dsh-cloud-handoff")
+    json.dump(d, open(p, "w"), indent=2, ensure_ascii=False)
+    print("已注册 bundle: dsh-cloud-handoff")
+else:
+    print("bundle 注册已存在")
+PYJSON
+chown "$DSH_USER:$DSH_USER" "$PROFILE_JSON"
+if ! python3 - "$PROFILE_JSON" <<'PYCHECK'
+import json, sys
+d = json.load(open(sys.argv[1]))
+deps = d.get("dependencies") or {}
+assert "dsh-cloud-handoff" in deps, "依赖缺失"
+assert "dsh-cloud-handoff" in d["dsh"]["profile"]["bundles"], "bundle 未注册"
+PYCHECK
+then
+  echo "✗ 插件注册校验失败（依赖或 bundles 缺失）" >&2
   exit 1
 fi
-echo "插件已链接并写入 cloud profile ✓"
+echo "插件已链接并注册到 cloud profile ✓"
 systemctl restart dsh-cloud || true
 
 # 启动后自检：云端插件 RPC 是否真的在线（DSH 冷启动约 20~30 秒，这里轮询最多 90 秒）

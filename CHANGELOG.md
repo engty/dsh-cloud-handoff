@@ -1,5 +1,19 @@
 # 更新记录
 
+## [未发布] — R3 真机验证修复（Debian 12 / Ubuntu 24.04 全新机器实测）
+
+一键脚本在**全新云镜像**上跑出来的真实问题，全部已修：
+- **插件未被云端加载**：`dsh plugin link/add` 只写 `dependencies`，不写 `dsh.profile.bundles`，插件装上却不会加载；脚本现在显式注册 bundle，并校验「依赖 + bundle」两项
+- **失败被静默吞掉**：插件链接失败时原来被 `|| true` 掩盖（用户会看到"对接成功"但云端无反应）；现在关键步骤失败即报错退出
+- **属主混乱**：stage 5 以 root 跑 pnpm 导致 profile 属主为 root，dshcloud 后续无权操作；现在统一属主并以 dshcloud 身份执行
+- **apt 撞锁**：全新镜像首次开机 cloud-init/unattended-upgrades 长时间占用 apt；现在等 cloud-init 结束 + `DPkg::Lock::Timeout=900` 让 apt 排队
+- **端口漂移**：重跑脚本每次生成新端口会破坏已配对客户端；端口现在持久化到云端 config 并沿用
+- **启动自检**：改为轮询 90 秒（DSH 冷启动约 20~30 秒），自检失败会明确警告
+- **不再安装代理软件**：删除 mihomo 部署；新增 `--mirror cn`（apt 换清华 TUNA + npm 换 npmmirror）
+- **发行版门禁**：仅支持 Debian 12/13 与 Ubuntu 22.04/24.04（其它发行版直接提示退出）；Ubuntu 增加 needrestart 非交互与 dpkg 配置冲突策略
+
+验证记录：Ubuntu 24.04 与 Debian 12 全新机器上，脚本自检均在第 10 秒通过；用对接码完成配对（SSH 免密 + 云端 RPC 在线）、跑通真实任务（云端执行 → 下载待取回 → 不落盘 → 确认完成 → 云端工作区/进出包/会话副本/job 记录全部清空）。
+
 ## [0.2.3] — 2026-10-08
 
 真机全链路验收后的修复：
