@@ -176,3 +176,15 @@ test("classifyResearchScope：研究目录内才算在范围，其余越界", as
   assert.deepEqual(r.deletedIn, ["cloud-research/notes.md"]);
   assert.deepEqual(r.deletedOut, ["src/old.js"]);
 });
+
+test("projectKeyFor：同一工作区稳定、不同工作区互异、不泄露路径", async () => {
+  const { projectKeyFor } = await import("../lib/handoff.mjs");
+  const a1 = projectKeyFor("/Users/alice/Projects/demo-app");
+  const a2 = projectKeyFor("/Users/alice/Projects/demo-app");
+  const b = projectKeyFor("/Users/alice/Projects/notes");
+  assert.equal(a1, a2, "同路径必须同键");
+  assert.notEqual(a1, b, "不同路径必须不同键");
+  assert.equal(a1.length, 16);
+  assert.ok(/^[0-9a-f]+$/.test(a1), "键应为十六进制");
+  assert.ok(!a1.includes("alice"), "键不得包含路径内容");
+});
