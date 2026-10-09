@@ -1,5 +1,11 @@
 # 更新记录
 
+## [0.3.3] — 2026-10-09
+
+- 修复 v0.3.0 载荷改造遗漏：`packBundle` 仍在读已移除的 `sessionLogs`，导致点击发送即报 `Cannot read properties of undefined (reading 'find')`
+- 新增打包干跑单测，防止同类回归
+- 冒烟验证：简报式迁移 + 云端新建会话 + API Key 通道**全链路跑通**（云端建目标 → 读简报 → 产出文件 → `dsh_cloud_finish` → receipt `changed` 正确）
+
 ## [0.3.2] — 2026-10-09
 
 **实测云端载荷上限，据此定简报预算（不再拍脑袋）**

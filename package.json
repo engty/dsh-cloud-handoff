@@ -1,6 +1,6 @@
 {
   "name": "dsh-cloud-handoff",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "「云接力」：把本地 DSH 会话一键迁到云端 DSH 继续执行，笔记本合盖/关机不中断；回本地重开自动同步云端结果（DeepSeek Harness 插件）",
   "license": "MIT",
   "type": "module",
