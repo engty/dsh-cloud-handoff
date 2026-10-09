@@ -121,3 +121,42 @@ test("scanWorkspace：git 仓库根目录走 git 模式", async () => {
   assert.ok(scan.files.includes("untracked.txt"));
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("buildTaskBrief → packBundle 集成：简报字段对齐（回归：曾因 brief/brief.text 命名不一致而失败）", async () => {
+  const { mkdtempSync, writeFileSync, rmSync, mkdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { spawnSync } = await import("node:child_process");
+  const { buildTaskBrief } = await import("../lib/brief.mjs");
+  const { packBundle } = await import("../lib/handoff.mjs");
+  const { buildSessionLog } = await import("../lib/import.mjs");
+
+  // 造一个最小合法会话日志（header + 两条消息）
+  const sessDir = mkdtempSync(join(tmpdir(), "brief-sess-"));
+  const logPath = join(sessDir, "session.v4.jsonl.zstd");
+  const header = JSON.stringify({ type: "session", version: 4, id: "session-test", createdAt: new Date().toISOString(), cwd: "/tmp/ws", isSeeded: false, delegationDepth: 0, agentPreset: "standard" });
+  const body = [
+    JSON.stringify({ type: "user/message", seq: 1, data: { content: [{ type: "text", text: "请优化这个仓库的构建速度" }] } }),
+    JSON.stringify({ type: "assistant/message", seq: 2, data: { message: { content: [{ type: "text", text: "已完成分析" }] } } }),
+  ];
+  await buildSessionLog(header, body, logPath);
+
+  const brief = await buildTaskBrief(logPath, { taskSummary: "优化构建速度", title: "构建优化" });
+  assert.equal(typeof brief.text, "string", "buildTaskBrief 必须返回 text 字段");
+  assert.ok(brief.text.length > 0);
+
+  // 打包必须接受该对象（字段名对齐）
+  const ws = mkdtempSync(join(tmpdir(), "brief-ws-"));
+  mkdirSync(join(ws, "sub"), { recursive: true });
+  writeFileSync(join(ws, "a.txt"), "x");
+  const staging = mkdtempSync(join(tmpdir(), "brief-stage-"));
+  const packed = await packBundle({
+    jobId: "22222222-2222-2222-2222-222222222222", cwd: ws, fileList: ["a.txt"],
+    listingMode: "walk", skipped: 0, brief, originSessionId: "session-test",
+    memoryFiles: [], attachments: [], title: "构建优化", taskSummary: "优化构建速度",
+    agentPreset: null, sandboxMode: null, model: null, localCwd: ws, stagingDir: staging,
+  });
+  assert.equal(packed.manifest.brief.bytes, brief.bytes);
+  assert.ok(packed.manifest.files["brief.md"], "bundle 必须包含 brief.md");
+  for (const p of [sessDir, ws, staging]) rmSync(p, { recursive: true, force: true });
+});
