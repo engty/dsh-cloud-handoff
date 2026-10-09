@@ -93,7 +93,7 @@
 - **事实**：云端是无头 DSH，**没有本地用户的登录态与账号型模型通道**；模型固定走 API Key 通道 `deepseek-official`，模型 `deepseek-v4-pro`（`lib/index.js` `DEFAULTS`）。
 - **后果**：依赖"登录态才能用的模型/能力"在云端不可用；迁移时本地会把会话里的模型选择改写为 API Key 通道（`rewriteSessionCwd` 的 `modelProvider` 改写）。
 - **记忆文件注意点（已知限制，待改造）**：`MEMORY.md`/`USER.md` 由本地复制到**云端共享的 mnemon 目录**（非按 jobId 隔离）；不同工作区发到同一台云端时，这些记忆文件会互相覆盖。
-  - 计划（v0.4.x）：改为**按工作区隔离**的云端项目命名空间 `/srv/dsh-cloud/handoff-projects/<projectKey>/{memory,journal.md}`，并保留跨任务的任务日志，实现"不同工作区隔离、同工作区连续"。
+  - 计划（v0.4.x）：改为**按工作区隔离**的云端项目命名空间 `$DSH_HOME/handoff-projects/<projectKey>/{memory,journal.md}`，并保留跨任务的任务日志，实现"不同工作区隔离、同工作区连续"。
 
 ### 2.8 清理与保留策略
 

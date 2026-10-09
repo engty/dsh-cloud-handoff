@@ -1,5 +1,14 @@
 # 更新记录
 
+## [0.5.1] — 2026-10-10
+
+- **修复云端项目命名空间创建失败**：`handoff-projects` 原放在 `/srv/dsh-cloud/`（root 属主）下，插件以 `dshcloud` 运行 → `EACCES: permission denied, mkdir`，任务卡在 PENDING；现改到 **DSH_HOME 下**（`/srv/dsh-cloud/home/handoff-projects`，归插件用户所有，任何部署都成立）
+- **实测验证隔离与连续**（受控测试，同一工作区发两次任务）：
+  - 命名空间按 projectKey 建立，含 `memory/`、`journal.md`、`workspace.json`；任务计数与首末时间正确（jobs=2）
+  - 任务结束时插件**自动追加**日志（任务/会话/结论/产出）
+  - 第二次任务的云端 agent **确实先读了 `.cloud-project/journal.md`** 并在产出中引用第一次任务的结论 → 跨任务连续成立
+- 文档同步：`docs/LIMITATIONS.md` 与 `docs/cloud-host-setup.md` 中的命名空间路径改为 DSH_HOME 下
+
 ## [0.5.0] — 2026-10-10
 
 **云端记忆按工作区隔离 + 同工作区连续**（用户边界：不同对话/工作区要隔离，同一工作区要能延续）
