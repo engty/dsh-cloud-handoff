@@ -160,3 +160,19 @@ test("buildTaskBrief → packBundle 集成：简报字段对齐（回归：曾�
   assert.ok(packed.manifest.files["brief.md"], "bundle 必须包含 brief.md");
   for (const p of [sessDir, ws, staging]) rmSync(p, { recursive: true, force: true });
 });
+
+test("classifyResearchScope：研究目录内才算在范围，其余越界", async () => {
+  const { classifyResearchScope } = await import("../lib/handoff.mjs");
+  const changed = [
+    { rel: "cloud-research/主题-复盘.md" },
+    { rel: "cloud-research/examples/fix.js" },
+    { rel: "src/index.js" },
+    { rel: "package.json" },
+    { rel: "README.md" },
+  ];
+  const r = classifyResearchScope(changed, ["src/old.js", "cloud-research/notes.md"], "cloud-research");
+  assert.deepEqual(r.inScope.map((f) => f.rel), ["cloud-research/主题-复盘.md", "cloud-research/examples/fix.js"]);
+  assert.deepEqual(r.outOfScope.map((f) => f.rel), ["src/index.js", "package.json", "README.md"]);
+  assert.deepEqual(r.deletedIn, ["cloud-research/notes.md"]);
+  assert.deepEqual(r.deletedOut, ["src/old.js"]);
+});
